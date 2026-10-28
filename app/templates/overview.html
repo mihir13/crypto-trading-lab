@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% import "_analysis.html" as A %}
+{% block title %}Dashboard · Crypto Trading Lab{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+<p class="sub">Every strategy and how far its evidence has got: backtest, out-of-sample test, then live paper trading. Everything here is paper trading, never a real order.</p>
+
+{% for tone, text, href in alerts %}
+<div class="note" style="{% if tone == 'bad' %}border-left-color: var(--bad){% endif %}"><a href="{{ href }}">{{ text }}</a></div>
+{% endfor %}
+
+<div class="grid">
+  <div class="tile"><div class="k">Strategies</div><div class="v">{{ rows | length }}</div></div>
+  <div class="tile"><div class="k">Bots running</div><div class="v">{{ bots | selectattr('status', 'eq', 'running') | list | length }} <span class="muted" style="font-size:14px;font-weight:500">of {{ bots | length }}</span></div></div>
+  <div class="tile"><div class="k">Live closed trades</div><div class="v">{{ live_trades }}</div></div>
+  <div class="tile"><div class="k">Candle data through</div><div class="v" style="font-size:18px">{{ data_through | date_ms if data_through else '–' }}</div></div>
+</div>
+
+<h2>Strategy pipeline</h2>
+{% if rows %}
+<div class="tbl-wrap"><table>
+  <tr><th>Strategy</th><th>Stage</th><th>Backtest (audit)</th><th>Out-of-sample</th><th>Live paper</th><th>Next step</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td class="wrap" style="min-width:200px"><a href="/strategies/{{ r.strategy.id }}" title="{{ r.tagline }}">{{ r.strategy.name }}</a><div class="muted" style="font-size:12px">{{ r.label }} · {{ r.strategy.pairs | pair_list }} · {{ r.strategy.timeframe }}</div></td>
+    <td class="wrap" style="min-width:130px">{{ A.pips(r.stage) }}<div class="muted" style="font-size:12px;margin-top:3px">{{ r.stage_name }}</div></td>
+    <td>{% if r.audit %}<a href="/backtest/run/{{ r.audit.id }}">{{ A.ret(r.audit.return_pct) }}</a> {{ A.vpill(r.audit.level) }}
+        <div class="muted" style="font-size:12px">{{ r.audit.trades }} trades · {{ '%.1f' % r.audit.years }}y</div>
+        {% else %}<span class="muted">{{ 'old settings' if r.stale else 'none' }}</span>{% endif %}</td>
+    <td>{% if r.oos %}<a href="/backtest/run/{{ r.oos.id }}">{{ A.ret(r.oos.return_pct) }}</a> {{ A.vpill(r.oos.level) }}
+        <div class="muted" style="font-size:12px">unseen period · {{ r.oos.trades }} trades</div>
+        {% else %}<span class="muted">none</span>{% endif %}</td>
+    <td>{% if r.live %}<a href="/bots/{{ r.live.bot_id }}">{{ A.ret(r.live.return_pct) }}</a>
+        {% if r.live.halted %}<span class="pill halt">halted</span>{% elif r.live.status == 'paused' %}<span class="pill off">paused</span>{% endif %}
+        <div class="muted" style="font-size:12px">{{ r.live.trades }}/{{ min_live }} trades · {{ '%.0f' % r.live.days }}d</div>
+        {% else %}<span class="muted">{{ 'older settings only' if r.other_bots else 'no bot' }}</span>{% endif %}</td>
+    <td class="wrap {{ r.tone }}" style="min-width:190px">{{ r.next }}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+<div class="hint">Stages need the strategy's <b>current</b> settings: a backtest or bot from older settings doesn't count. Details and charts on <a href="/analysis">Analysis</a>.</div>
+{% else %}
+<div class="tbl-wrap"><div class="empty">No strategies yet. <a href="/strategies/new">Create one</a>.</div></div>
+{% endif %}
+
+{% if bots %}
+<h2>Live bots</h2>
+<div class="tbl-wrap"><table>
+  <tr><th>Bot</th><th>Status</th><th class="num">Balance</th><th class="num">Return</th><th class="num">Closed</th><th class="num">Open</th></tr>
+  {% for b in bots %}
+  <tr><td><a href="/bots/{{ b.id }}">{{ b.name }}</a> <span class="muted">· {{ b.strat_label }}</span></td>
+    <td>{% if b.halted %}<span class="pill halt">halted</span>{% elif b.status == 'running' %}<span class="pill on">running</span>{% else %}<span class="pill off">paused</span>{% endif %}</td>
+    <td class="num">{{ b.summ.balance | money }}</td>
+    <td class="num {{ 'good' if b.summ.return_pct >= 0 else 'bad' }}">{{ b.summ.return_pct | signed }}%</td>
+    <td class="num">{{ b.summ.trades }}</td><td class="num">{{ b.n_open }}</td></tr>
+  {% endfor %}
+</table></div>
+{% endif %}
+{% endblock %}

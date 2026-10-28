@@ -1,0 +1,302 @@
+{% extends "base.html" %}
+{% block title %}Run #{{ run.id }} · Backtest Lab{% endblock %}
+
+{# One evaluated period: comparison table, charts, funnel, stress tests, tables. `tag` makes element ids unique. #}
+{% macro block_view(b, tag, run_id, csv_which) %}
+  {% set s = b.summary %}{% set h = b.bh.summary %}{% set r = b.random %}{% set rr = b.random_regime %}{% set boot = b.bootstrap %}
+  {% if s.trades == 0 %}
+  <div class="hint" style="margin-top:8px">For context: buying and holding the same coins over {{ b.window.start | date_ms }} to {{ b.window.end | date_ms }} returned {{ h.return_pct | pct }} with a worst drawdown of {{ '%.1f' % h.max_dd_pct }}%. The strategy made no trades, so the two are not comparable.</div>
+  {% else %}
+  <div class="grid" style="margin-top:8px">
+    <div class="tile"><div class="k">Strategy return</div>
+      <div class="v {{ 'good' if s.return_pct > 0 else 'bad' if s.return_pct < 0 }}">{{ s.return_pct | pct }}</div></div>
+    <div class="tile"><div class="k">Buy &amp; hold</div><div class="v">{{ h.return_pct | pct }}</div></div>
+    <div class="tile"><div class="k">Trades</div><div class="v">{{ s.trades }}</div></div>
+    <div class="tile"><div class="k">Beats random entries</div>
+      <div class="v">{{ ('%.0f%%' % r.pctile_return) if r else '–' }}</div></div>
+    <div class="tile"><div class="k">Worst drawdown</div><div class="v">{{ '%.1f' % s.max_dd_pct }}%</div></div>
+  </div>
+
+  <h2>Strategy vs the alternatives</h2>
+  <div class="tbl-wrap"><table>
+    <tr><th>{{ b.window.start | date_ms }} to {{ b.window.end | date_ms }} ({{ '%.2f' % b.window.years }} years)</th>
+        <th class="num">Strategy</th><th class="num">Buy &amp; hold</th><th class="num">Random entries</th>
+        {% if rr %}<th class="num">Random, same regime</th>{% endif %}</tr>
+    <tr><td>Total return</td><td class="num">{{ s.return_pct | pct }}</td><td class="num">{{ h.return_pct | pct }}</td>
+        <td class="num">{% if r %}median {{ r.median | pct }} <span class="muted">({{ r.p5 | pct(0) }} to {{ r.p95 | pct(0) }})</span>{% else %}–{% endif %}</td>
+        {% if rr %}<td class="num">median {{ rr.median | pct }} <span class="muted">({{ rr.p5 | pct(0) }} to {{ rr.p95 | pct(0) }})</span></td>{% endif %}</tr>
+    <tr><td>Strategy beat this share of random runs</td><td class="num">–</td><td class="num">–</td>
+        <td class="num">{% if r %}{{ '%.1f' % r.pctile_return }}%{% else %}–{% endif %}</td>
+        {% if rr %}<td class="num">{{ '%.1f' % rr.pctile_return }}%</td>{% endif %}</tr>
+    <tr><td>Worst drawdown</td><td class="num">{{ '%.1f' % s.max_dd_pct }}%</td><td class="num">{{ '%.1f' % h.max_dd_pct }}%</td><td class="num">–</td>{% if rr %}<td class="num">–</td>{% endif %}</tr>
+    <tr><td>Sharpe ratio</td><td class="num">{{ s.sharpe | fx }}</td><td class="num">{{ h.sharpe | fx }}</td><td class="num">–</td>{% if rr %}<td class="num">–</td>{% endif %}</tr>
+    <tr><td>Trades</td><td class="num">{{ s.trades }} <span class="muted">({{ '%.1f' % (s.trades_per_month or 0) }}/month)</span></td><td class="num">–</td>
+        <td class="num">{% if r %}about {{ '%.0f' % r.mean_trades }}{% else %}–{% endif %}</td>
+        {% if rr %}<td class="num">about {{ '%.0f' % rr.mean_trades }}</td>{% endif %}</tr>
+    <tr><td>Win rate / profit factor</td><td class="num">{{ ('%.0f%%' % s.win_rate) if s.win_rate is not none else '–' }} / {{ s.profit_factor | fx }}</td><td class="num">–</td><td class="num">–</td>{% if rr %}<td class="num">–</td>{% endif %}</tr>
+    <tr><td>Average per trade</td><td class="num">{{ s.mean_r | fx }}R
+        {% if boot %}<span class="muted">(95%: {{ '%+.2f' % boot.lo }} to {{ '%+.2f' % boot.hi }})</span>{% endif %}</td><td class="num">–</td>
+        <td class="num">{% if r %}median {{ r.median_mean_r | fx }}R{% else %}–{% endif %}</td>
+        {% if rr %}<td class="num">median {{ rr.median_mean_r | fx }}R</td>{% endif %}</tr>
+    <tr><td>Time in the market</td><td class="num">{{ '%.1f' % s.exposure_pct }}%</td><td class="num">100%</td><td class="num">–</td>{% if rr %}<td class="num">–</td>{% endif %}</tr>
+    <tr><td>Fees / funding paid</td><td class="num">{{ s.fees | money }} / {{ s.funding | money }}</td><td class="num">–</td><td class="num">–</td>{% if rr %}<td class="num">–</td>{% endif %}</tr>
+    <tr><td>Exits</td><td class="num wrap" style="text-align:right">{% for k, v in s.outcomes.items() %}{{ k.title() }} {{ v }}{{ ' · ' if not loop.last }}{% endfor %}</td><td class="num">–</td><td class="num">–</td>{% if rr %}<td class="num">–</td>{% endif %}</tr>
+  </table></div>
+  <div class="hint">R = a trade's result divided by the amount risked on it: -1R is a full stop-out, +2R is winning twice the risk. "Random entries" enter at random on any candle with the same stops, targets, exits and costs; "same regime" only enters at random while the strategy's own regime filter (e.g. above the 200 EMA) is on, so beating it means the entry trigger adds value beyond just being in that regime.
+    Buy &amp; hold per coin: {% for sym, d in b.bh.per_symbol.items() %}{{ sym | pair }} {{ d.return_pct | pct(0) }}{{ ' · ' if not loop.last }}{% endfor %}.</div>
+
+  <script type="application/json" data-block="{{ tag }}">{{ {'eq': b.equity, 'bh': b.bh.equity, 'rand': (r.returns if r else none), 'mine': s.return_pct} | tojson }}</script>
+  <div class="cols" style="margin-top:18px">
+    <div><div class="k" style="margin-bottom:6px">Equity: strategy vs buy &amp; hold</div><div class="chart-box"><canvas id="eq-{{ tag }}"></canvas></div></div>
+    {% if r %}
+    <div><div class="k" style="margin-bottom:6px">Where the strategy lands among {{ r.n }} random-entry runs</div><div class="chart-box"><canvas id="hist-{{ tag }}"></canvas></div></div>
+    {% endif %}
+  </div>
+
+  {% endif %}
+
+  {% if b.funnel %}
+  <h2>Signal funnel: where entries die</h2>
+  <div class="tbl-wrap"><table>
+    <tr><th>Step</th><th></th><th class="num">Count</th>{% for sym in b.funnel[0].by_symbol %}<th class="num">{{ sym | pair }}</th>{% endfor %}</tr>
+    {% for f in b.funnel %}
+    <tr><td class="wrap">{{ f.label }}</td>
+        <td style="width:30%"><div class="bar"><i style="width: {{ f.bar }}%"></i></div></td>
+        <td class="num">{{ '{:,}'.format(f.total) }}</td>
+        {% for sym, n in f.by_symbol.items() %}<td class="num muted">{{ '{:,}'.format(n) }}</td>{% endfor %}</tr>
+    {% endfor %}
+  </table></div>
+  <div class="hint">Each row applies one more condition of the entry rule to the candles that passed the row above (bars use a log scale).</div>
+  {% endif %}
+
+  {% if b.stress %}
+  <h2>Cost and timing stress tests</h2>
+  <div class="tbl-wrap"><table>
+    <tr><th>Scenario</th><th class="num">Return</th><th class="num">Trades</th><th class="num">Profit factor</th><th class="num">Avg per trade (R)</th><th class="num">Worst drawdown</th></tr>
+    {% for x in b.stress %}
+    <tr><td>{{ x.label }}</td><td class="num {{ 'good' if x.return_pct > 0 else 'bad' }}">{{ x.return_pct | pct }}</td><td class="num">{{ x.trades }}</td>
+        <td class="num">{{ x.profit_factor | fx }}</td><td class="num">{{ x.mean_r | fx }}</td><td class="num">{{ '%.1f' % x.max_dd_pct }}%</td></tr>
+    {% endfor %}
+  </table></div>
+  <div class="hint">Same trades, harsher assumptions. An edge that disappears at 2x slippage or one candle of delay will not survive contact with a real exchange.</div>
+  {% endif %}
+
+  {% if b.by_quarter and s.trades > 0 %}
+  <h2>Quarter by quarter</h2>
+  <div class="tbl-wrap"><table>
+    <tr><th>Quarter</th><th class="num">Strategy</th><th class="num">Buy &amp; hold</th><th class="num">Trades closed</th></tr>
+    {% for q in b.by_quarter %}
+    <tr><td>{{ q.q }}</td><td class="num {{ 'good' if q.strategy and q.strategy > 0 else 'bad' if q.strategy and q.strategy < 0 }}">{{ q.strategy | pct }}</td>
+        <td class="num muted">{{ q.hold | pct }}</td><td class="num">{{ q.trades }}</td></tr>
+    {% endfor %}
+  </table></div>
+  <div class="hint">A real edge shows up in most quarters. One or two great quarters carrying the whole result is a warning sign.</div>
+  {% endif %}
+
+  {% if b.trades %}
+  <h2>Trades{% if b.trades_truncated %} (latest 3,000){% endif %}
+    <a href="/backtest/run/{{ run_id }}/trades.csv?which={{ csv_which }}" style="font-size:12px;font-weight:400">download CSV</a></h2>
+  <div class="tbl-wrap"><table>
+    <tr><th>Pair</th><th>Entered (UK time)</th><th>Exited (UK time)</th><th>Outcome</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">Hours</th><th class="num">Net $</th><th class="num">R</th></tr>
+    {% for t in (b.trades | reverse | list)[:60] %}
+    <tr><td>{{ t.symbol | pair }}</td><td>{{ t.entry_ts | datetime_ms }}</td><td>{{ t.exit_ts | datetime_ms }}</td><td>{{ t.outcome.title() }}</td>
+        <td class="num">{{ '%.4f' % t.entry }}</td><td class="num">{{ '%.4f' % t.exit }}</td><td class="num">{{ '%.0f' % t.hold_h }}</td>
+        <td class="num {{ 'good' if t.net > 0 else 'bad' }}">{{ t.net | signed(3) }}</td><td class="num">{{ '%+.2f' % t.r }}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% if b.trades | length > 60 %}<div class="hint">Showing the latest 60 of {{ b.trades | length }}. The CSV has all of them.</div>{% endif %}
+  {% endif %}
+{% endmacro %}
+
+{% macro checks_view(checks) %}
+  <div class="tbl-wrap" style="padding:6px 0">
+  {% for c in checks %}
+    <div class="chk {{ c.status }}"><span class="mark">{{ '✓' if c.status == 'pass' else '!' if c.status == 'warn' else '✕' }}</span>
+      <div><b>{{ c.name }}</b>{% if c.critical %} <span class="muted" style="font-size:11px">· key check</span>{% endif %}<div class="muted">{{ c.detail }}</div></div></div>
+  {% endfor %}
+  </div>
+{% endmacro %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ {'audit': 'Audit', 'oos': 'Out-of-sample test', 'data': 'Data download'}[run.kind] }} #{{ run.id }}</h1>
+    <p class="sub">
+      {% if run.kind != 'data' %}{{ strategies[config.strategy].label if config.strategy in strategies else config.strategy }} · {{ config.symbols | pair_list(short=False) }} · {{ config.tf }} · started {{ run.created | iso_local }} UK time{% else %}started {{ run.created | iso_local }} UK time{% endif %}
+    </p>
+  </div>
+  <div class="actions">
+    <a class="btn ghost" href="/backtest">All runs</a>
+    {% if run.status in ('done', 'error') %}
+    <form method="post" action="/backtest/run/{{ run.id }}/delete" onsubmit="return confirm('Delete this run?')"><button class="danger">Delete</button></form>
+    {% endif %}
+  </div>
+</div>
+
+{% if run.status in ('queued', 'running') %}
+  <div class="card" style="border-top-color: var(--accent)">
+    <h3><span id="pmsg">{{ run.message }}</span></h3>
+    <div class="bar big"><i id="pbar" style="width: {{ (run.progress * 100) | round(0) }}%"></i></div>
+    <p class="muted" style="margin-top:10px">This page updates by itself. You can leave; the job keeps running.</p>
+  </div>
+  <script>
+    (function poll() {
+      fetch('/backtest/run/{{ run.id }}/status').then(r => r.json()).then(s => {
+        document.getElementById('pmsg').textContent = s.message;
+        document.getElementById('pbar').style.width = Math.round(s.progress * 100) + '%';
+        if (s.status === 'done' || s.status === 'error') location.reload(); else setTimeout(poll, 1500);
+      }).catch(() => setTimeout(poll, 3000));
+    })();
+  </script>
+
+{% elif run.status == 'error' %}
+  <div class="verdict v-none"><div class="vh">This job failed</div><div class="vr">{{ run.message }}</div></div>
+
+{% elif run.kind == 'data' %}
+  <div class="card"><h3>Data is up to date</h3>
+    <p>New rows fetched:</p>
+    <ul class="plain">{% for k, v in res.added.items() %}<li>{{ k }}: {{ '{:,}'.format(v) }}</li>{% endfor %}</ul>
+    <a class="btn" href="/backtest">Back to the Backtest Lab</a></div>
+
+{% elif res %}
+  <div class="verdict v-{{ res.verdict.level }}">
+    <div class="vh">{{ res.verdict.headline }}</div>
+    {% if res.verdict.reasons %}<ul class="vr">{% for x in res.verdict.reasons %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+    <div class="vn">
+      {% if run.kind == 'oos' %}This verdict is based on the <b>unseen test period</b>. Tuned results on the training period are flattering by construction and shouldn't be used to judge the strategy.{% elif res.block.summary.trades > 0 %}
+      Verdicts never say "profitable": at best they say some evidence exists, which still needs forward (paper) testing.{% endif %}
+    </div>
+  </div>
+
+  <h2>Data used</h2>
+  <div class="tbl-wrap"><table>
+    <tr><th>Pair</th><th>From</th><th>To</th><th class="num">Candles</th><th class="num">Missing</th><th>Funding</th></tr>
+    {% for sym, d in res.data.items() %}
+    <tr><td>{{ sym }}</td><td>{{ d.first }}</td><td>{{ d.last }}</td><td class="num">{{ '{:,}'.format(d.candles) }}</td><td class="num">{{ d.missing }}</td>
+        <td class="muted">{{ d.funding_real }} Bitget rows + Binance proxy</td></tr>
+    {% endfor %}
+  </table></div>
+
+  {% if run.kind == 'audit' %}
+    {% if res.block.summary.trades == 0 %}
+      <div class="note"><b>The strategy never traded.</b> With these parameters its entry rule can't fire in this data, so there is no performance to measure and "doing nothing" simply avoided the market's losses. The funnel below shows exactly which condition blocks it. Use an out-of-sample test to explore relaxing the rule honestly.</div>
+    {% endif %}
+    <h2>Parameters tested</h2>
+    <div class="tbl-wrap"><table><tr>{% for k, v in res.block.params.items() %}<th>{{ k }}</th>{% endfor %}</tr>
+      <tr>{% for k, v in res.block.params.items() %}<td>{{ v }}</td>{% endfor %}</tr></table></div>
+    {% if res.block.summary.trades > 0 %}
+    <h2>Honesty checks</h2>
+    {{ checks_view(res.checks) }}
+    {% endif %}
+    {{ block_view(res.block, 'a', run.id, 'test') }}
+
+  {% else %}{# ── out-of-sample ── #}
+    <h2>How this test was run</h2>
+    <div class="tbl-wrap"><table class="kv">
+      <tr><td>Training period (tuning allowed here only)</td><td>{{ res.split.train_start | date_ms }} to {{ res.split.split | date_ms }}</td></tr>
+      <tr><td>Unseen test period (measured once)</td><td>{{ res.split.split | date_ms }} to {{ res.split.test_end | date_ms }}</td></tr>
+      <tr><td>Parameter sets tried</td><td>{{ res.diag.n_tried }} ({{ res.diag.n_eligible }} made at least {{ res.diag.min_trades }} training trades and could be selected)</td></tr>
+      <tr><td>Selection rule</td><td>Highest t-statistic of per-trade results in the training period (rewards consistency, penalises lucky small samples)</td></tr>
+    </table></div>
+
+    {% if res.diag.selected %}
+    {% set sel = res.diag.selected %}
+    <h2>Parameters chosen on the training period</h2>
+    <div class="tbl-wrap"><table>
+      <tr><th></th>{% for k in sel.params %}<th>{{ k }}</th>{% endfor %}</tr>
+      <tr><td>Your original</td>{% for k in sel.params %}<td class="muted">{{ res.default_params[k] }}</td>{% endfor %}</tr>
+      <tr><td>Chosen</td>{% for k, v in sel.params.items() %}<td class="{{ 'warn' if v != res.default_params[k] }}">{{ v }}</td>{% endfor %}</tr>
+    </table></div>
+
+    <h2>Training vs unseen test</h2>
+    <div class="cols">
+      <div class="card" style="border-top-color: var(--muted)">
+        <div class="k">Training period (flattering by construction)</div>
+        <div class="big {{ 'good' if res.train.summary.return_pct > 0 else 'bad' }}">{{ res.train.summary.return_pct | pct }}</div>
+        <div class="muted">{{ res.train.summary.trades }} trades · profit factor {{ res.train.summary.profit_factor | fx }} · {{ res.train.summary.mean_r | fx }}R per trade<br>
+          Buy &amp; hold over the same dates: {{ res.train.bh.summary.return_pct | pct }}</div>
+      </div>
+      <div class="card" style="border-top-color: var(--accent)">
+        <div class="k">Unseen test period (the number to believe)</div>
+        <div class="big {{ 'good' if res.test.summary.return_pct > 0 else 'bad' }}">{{ res.test.summary.return_pct | pct }}</div>
+        <div class="muted">{{ res.test.summary.trades }} trades · profit factor {{ res.test.summary.profit_factor | fx }} · {{ res.test.summary.mean_r | fx }}R per trade<br>
+          Buy &amp; hold over the same dates: {{ res.test.bh.summary.return_pct | pct }}</div>
+      </div>
+    </div>
+    {% if res.untuned_test %}
+    <div class="hint">For reference, your original untuned parameters on the same unseen period made {{ res.untuned_test.summary.trades }} trades and returned {{ res.untuned_test.summary.return_pct | pct }}.</div>
+    {% endif %}
+
+    <h2>Was the tuning meaningful?</h2>
+    <div class="grid">
+      <div class="tile"><div class="k">Sets tried</div><div class="v">{{ res.diag.n_tried }}</div></div>
+      <div class="tile"><div class="k">Profitable on unseen data</div><div class="v">{{ ('%.0f%%' % res.diag.share_profitable_test) if res.diag.share_profitable_test is not none else '–' }}</div></div>
+      <div class="tile"><div class="k">Median unseen return</div><div class="v">{{ res.diag.median_test_return | pct(0) }}</div></div>
+      <div class="tile"><div class="k">Train-test rank correlation</div><div class="v">{{ res.diag.spearman | fx }}</div></div>
+      <div class="tile"><div class="k">Chosen set beat (of others, unseen)</div><div class="v">{{ ('%.0f%%' % res.diag.selected_test_rank_pct) if res.diag.selected_test_rank_pct is not none else '–' }}</div></div>
+      <div class="tile"><div class="k">t-stat by luck alone</div><div class="v">{{ res.diag.expected_best_t_by_luck | fx }}</div></div>
+    </div>
+    <div class="hint">Rank correlation: +1 means the sets that did best in training also did best on unseen data (tuning worked), 0 means training results told you nothing, negative means they were misleading. "t-stat by luck alone" is roughly the best score you'd expect from the best of {{ res.diag.n_eligible }} tries even if nothing had any real edge.</div>
+
+    <h2>Honesty checks (on the unseen test period)</h2>
+    {{ checks_view(res.checks) }}
+
+    <h2>Top parameter sets by training score, and what happened next</h2>
+    <div class="tbl-wrap"><table>
+      <tr><th>Parameters that differ from your original</th><th class="num">Train trades</th><th class="num">Train return</th><th class="num">Train t</th><th class="num">Test trades</th><th class="num">Test return</th><th class="num">Test t</th></tr>
+      {% for x in res.diag.top %}
+      <tr><td class="wrap">{% for k, v in x.params.items() if v != res.default_params[k] %}<code>{{ k }}={{ v }}</code> {% endfor %}</td>
+        <td class="num">{{ x.train.trades }}</td><td class="num good">{{ x.train.return_pct | pct(0) }}</td><td class="num">{{ x.train.t_stat | fx }}</td>
+        <td class="num">{{ x.test.trades }}</td><td class="num {{ 'good' if x.test.return_pct and x.test.return_pct > 0 else 'bad' }}">{{ x.test.return_pct | pct(0) }}</td><td class="num">{{ x.test.t_stat | fx }}</td></tr>
+      {% endfor %}
+    </table></div>
+
+    <h2>Unseen test period in detail</h2>
+    {{ block_view(res.test, 'test', run.id, 'test') }}
+
+    <h2>Training period in detail (for comparison only)</h2>
+    {{ block_view(res.train, 'train', run.id, 'train') }}
+    {% else %}
+    <h2>Honesty checks</h2>
+    {{ checks_view(res.checks) }}
+    {% endif %}
+  {% endif %}
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script>
+    const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+    const fmtMonth = v => new Date(v).toISOString().slice(0, 7);
+    function drawBlock(el) {
+      const tag = el.dataset.block, d = JSON.parse(el.textContent);
+      const accent = css('--accent'), muted = css('--muted'), line = css('--line');
+      const pts = s => s.t.map((t, i) => ({ x: t, y: s.v[i] }));
+      new Chart(document.getElementById('eq-' + tag), {
+        type: 'line',
+        data: { datasets: [
+          { label: 'Strategy', data: pts(d.eq), borderColor: accent, borderWidth: 2, pointRadius: 0, tension: 0 },
+          { label: 'Buy & hold', data: pts(d.bh), borderColor: muted, borderWidth: 1.5, borderDash: [5, 4], pointRadius: 0, tension: 0 } ] },
+        options: { parsing: false, maintainAspectRatio: false, animation: false,
+          plugins: { legend: { labels: { color: muted, boxWidth: 14 } } },
+          scales: { x: { type: 'linear', min: d.eq.t[0], max: d.eq.t[d.eq.t.length - 1], ticks: { color: muted, maxTicksLimit: 7, callback: fmtMonth }, grid: { display: false } },
+                    y: { ticks: { color: muted, callback: v => '$' + v }, grid: { color: line } } } }
+      });
+      const h = document.getElementById('hist-' + tag);
+      if (h && d.rand) {
+        const lo = Math.min(...d.rand, d.mine), hi = Math.max(...d.rand, d.mine), n = 18, w = (hi - lo) / n || 1;
+        const bins = Array(n).fill(0);
+        d.rand.forEach(x => bins[Math.min(n - 1, Math.floor((x - lo) / w))]++);
+        const mineBin = Math.min(n - 1, Math.floor((d.mine - lo) / w));
+        new Chart(h, { type: 'bar',
+          data: { labels: bins.map((_, i) => (lo + w * (i + .5)).toFixed(0) + '%'),
+                  datasets: [{ data: bins, backgroundColor: bins.map((_, i) => i === mineBin ? accent : muted + '88') }] },
+          options: { maintainAspectRatio: false, animation: false,
+            plugins: { legend: { display: false }, tooltip: { callbacks: { title: c => 'Random runs near ' + c[0].label } } },
+            scales: { x: { ticks: { color: muted, maxTicksLimit: 8 }, grid: { display: false },
+                             title: { display: true, text: 'Return of random-entry runs (amber bar = your strategy)', color: muted } },
+                      y: { ticks: { color: muted }, grid: { color: line } } } } });
+      }
+    }
+    if (window.Chart) document.querySelectorAll('script[data-block]').forEach(drawBlock);
+  </script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% import "_analysis.html" as A %}
+{% block title %}Analysis · Crypto Trading Lab{% endblock %}
+{% block content %}
+<h1>Analysis</h1>
+<p class="sub">Compare strategies on the same footing: what the backtest says, whether it held up on data it never saw, and whether the live paper bots behave the way the backtest predicted.</p>
+
+<form method="get" action="/analysis" class="panel">
+  <div class="k">Strategies to compare</div>
+  <div class="chk-list">
+    {% for s in everything %}
+    <label><input type="checkbox" name="s" value="{{ s.id }}" {{ 'checked' if s.id in chosen_ids }}> {{ s.name }}</label>
+    {% endfor %}
+  </div>
+  <div style="margin-top:10px"><button>Compare</button></div>
+</form>
+
+{% if not rows %}
+<div class="tbl-wrap"><div class="empty">Nothing to compare yet. <a href="/strategies/new">Create a strategy</a>.</div></div>
+{% else %}
+
+<h2>How far has each strategy got?</h2>
+<div class="tbl-wrap"><table>
+  <tr><th>Strategy</th><th>Stage</th><th>Where it stands</th></tr>
+  {% for r in rows %}
+  <tr><td><a href="/strategies/{{ r.strategy.id }}">{{ r.strategy.name }}</a></td>
+    <td>{{ A.pips(r.stage) }}<span class="muted">{{ r.stage_name }}</span></td>
+    <td class="wrap {{ r.tone }}">{{ r.next }}</td></tr>
+  {% endfor %}
+</table></div>
+<div class="hint">Four gates, each needing the one before, and each counted only if it was obtained with the strategy's <b>current</b> settings:
+  <b>1</b> backtested · <b>2</b> passes the honesty checks and made money after costs · <b>3</b> the same holds on the unseen out-of-sample period · <b>4</b> a paper bot has at least {{ min_live }} closed trades and is profitable. Fewer live trades than that is mostly luck.</div>
+
+<h2>Backtest (audit)</h2>
+{% set with_audit = rows | selectattr('audit_series', 'defined') | list %}
+{% if with_audit %}
+<div class="tbl-wrap"><table>
+  <tr><th>Strategy</th><th class="num">Return</th><th class="num">Per year</th><th class="num">Buy &amp; hold</th><th class="num">Max DD</th><th class="num">Sharpe</th>
+      <th class="num">Trades</th><th class="num">Win rate</th><th class="num">Profit factor</th><th class="num">Mean R</th><th class="num">Beats random</th><th>Verdict</th></tr>
+  {% for r in with_audit %}{% set x = r.audit_series.summary %}
+  <tr><td><a href="/backtest/run/{{ r.audit.id }}">{{ r.strategy.name }}</a></td>
+    <td class="num">{{ A.ret(x.return_pct) }}</td>
+    <td class="num">{{ x.cagr_pct | pct if x.cagr_pct is not none else '–' }}</td>
+    <td class="num muted">{{ r.audit_series.bh.return_pct | pct }}</td>
+    <td class="num">{{ '%.1f' % x.max_dd_pct }}%</td>
+    <td class="num">{{ '%.2f' % x.sharpe if x.sharpe is not none else '–' }}</td>
+    <td class="num">{{ x.trades }}</td>
+    <td class="num">{{ '%.0f' % x.win_rate ~ '%' if x.win_rate is not none else '–' }}</td>
+    <td class="num">{{ '%.2f' % x.profit_factor if x.profit_factor is not none else '–' }}</td>
+    <td class="num">{{ '%.2f' % x.mean_r if x.mean_r is not none else '–' }}{% if x.t_stat is not none %} <span class="muted">(t {{ '%.1f' % x.t_stat }})</span>{% endif %}</td>
+    <td class="num">{{ '%.0f%%' % r.audit_series.beats_random if r.audit_series.beats_random is not none else '–' }}</td>
+    <td>{{ A.vpill(r.audit.level) }}</td></tr>
+  {% endfor %}
+</table></div>
+<div class="hint">Mean R is the average profit per trade in units of the amount risked. "Beats random" is the share of random-entry runs (same costs, same trade count) this strategy out-earned. Look for a mean R clearly above zero across many trades, not one big winner.</div>
+
+<h2>Equity curves (backtest, % return)</h2>
+<div class="chart-box"><canvas id="bt-chart"></canvas></div>
+<div class="hint">Different strategies may cover different periods and coins, so compare shapes (steady climb or a few lucky jumps, depth of drops), not just the end point.</div>
+{% else %}
+<div class="tbl-wrap"><div class="empty">No current-settings audits yet. Open a strategy and press "Run audit".</div></div>
+{% endif %}
+
+<h2>Out-of-sample (unseen period)</h2>
+{% set with_oos = rows | selectattr('oos_series', 'defined') | rejectattr('oos_series', 'none') | list %}
+{% if with_oos %}
+<div class="tbl-wrap"><table>
+  <tr><th>Strategy</th><th class="num">Tuned, training period</th><th class="num">Same, unseen period</th><th class="num">Buy &amp; hold (unseen)</th><th class="num">Trades</th><th class="num">Mean R</th><th>Verdict</th></tr>
+  {% for r in with_oos %}{% set x = r.oos_series.summary %}
+  <tr><td><a href="/backtest/run/{{ r.oos.id }}">{{ r.strategy.name }}</a></td>
+    <td class="num muted">{{ r.oos.train_return_pct | pct if r.oos.train_return_pct is defined else '–' }}</td>
+    <td class="num">{{ A.ret(x.return_pct) }}</td>
+    <td class="num muted">{{ r.oos_series.bh.return_pct | pct }}</td>
+    <td class="num">{{ x.trades }}</td>
+    <td class="num">{{ '%.2f' % x.mean_r if x.mean_r is not none else '–' }}</td>
+    <td>{{ A.vpill(r.oos.level) }}</td></tr>
+  {% endfor %}
+</table></div>
+<div class="hint">A big gap between the training and unseen columns is the signature of overfitting: parameters that were tuned to the past and didn't carry forward.</div>
+{% else %}
+<div class="tbl-wrap"><div class="empty">No current-settings out-of-sample tests yet.</div></div>
+{% endif %}
+
+<h2>Live paper bots</h2>
+{% if live_rows %}
+<div class="tbl-wrap"><table>
+  <tr><th>Bot</th><th>Strategy</th><th>Status</th><th class="num">Days</th><th class="num">Closed trades</th><th class="num">Return</th>
+      <th class="num">Win rate</th><th class="num">Profit factor</th><th class="num">Max DD</th><th>Backtest vs live</th></tr>
+  {% for b in live_rows %}
+  <tr>
+    <td><a href="/bots/{{ b.bot_id }}">#{{ b.bot_id }} {{ b.name }}</a></td>
+    <td><a href="/strategies/{{ b.strategy.id }}">{{ b.strategy.name }}</a>{% if not b.current %} <span class="pill off" title="This bot runs older settings than the strategy has now">older settings</span>{% endif %}</td>
+    <td>{% if b.halted %}<span class="pill halt">halted</span>{% elif b.status == 'running' %}<span class="pill on">running</span>{% else %}<span class="pill off">paused</span>{% endif %}</td>
+    <td class="num">{{ '%.0f' % b.days }}</td>
+    <td class="num">{{ b.trades }}<span class="muted">/{{ min_live }}</span></td>
+    <td class="num">{{ A.ret(b.return_pct) }}</td>
+    <td class="num">{{ '%.0f' % b.win_rate }}%</td>
+    <td class="num">{{ '%.2f' % b.profit_factor if b.profit_factor is not none else '–' }}</td>
+    <td class="num">{{ '%.1f' % b.max_drawdown }}%</td>
+    <td><a href="/analysis/replay/{{ b.bot_id }}">Replay the backtest over this bot's window</a></td>
+  </tr>
+  {% endfor %}
+</table></div>
+<h2>Equity curves (live, % return)</h2>
+<div class="chart-box"><canvas id="live-chart"></canvas></div>
+<div class="hint">Realised equity only: it steps up or down each time a trade closes.</div>
+{% else %}
+<div class="tbl-wrap"><div class="empty">No paper bots for these strategies yet.</div></div>
+{% endif %}
+
+{% set with_syms = rows | selectattr('audit_series', 'defined') | list %}
+{% if with_syms %}
+<h2>Where the backtest profit came from</h2>
+<div class="tbl-wrap"><table>
+  <tr><th>Strategy</th><th>Pair</th><th class="num">Trades</th><th class="num">Win rate</th><th class="num">Net P&amp;L ($ on the test capital)</th></tr>
+  {% for r in with_syms %}{% for sym, d in r.audit_series.by_symbol.items() %}
+  <tr><td>{{ r.strategy.name if loop.first else '' }}</td><td>{{ sym | pair(short=False) }}</td><td class="num">{{ d.trades }}</td>
+    <td class="num">{{ '%.0f' % (d.wins / d.trades * 100) if d.trades else '–' }}%</td>
+    <td class="num {{ 'good' if d.net > 0 else 'bad' if d.net < 0 else '' }}">{{ d.net | signed }}</td></tr>
+  {% endfor %}{% endfor %}
+</table></div>
+<div class="hint">If one coin supplies nearly all the profit, the strategy may just have been lucky on it.</div>
+
+<h2>Honesty checks</h2>
+<div class="tbl-wrap"><table>
+  <tr><th>Strategy</th><th>Passed</th><th>Warnings</th><th>Failed</th><th>Main concerns</th></tr>
+  {% for r in with_syms %}{% set c = r.audit_series.checks %}
+  <tr><td><a href="/backtest/run/{{ r.audit.id }}">{{ r.strategy.name }}</a></td>
+    <td class="good">{{ c.pass }}</td><td class="warn">{{ c.warn }}</td><td class="bad">{{ c.fail }}</td>
+    <td class="wrap muted">{{ r.audit_series.reasons | join(' · ') if r.audit_series.reasons else 'None of the critical checks failed.' }}</td></tr>
+  {% endfor %}
+</table></div>
+{% endif %}
+
+{% endif %}
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const PALETTE = ['#ffb000', '#35c9ff', '#ff6bd6', '#35ff8a', '#b28dff', '#ff8a4d', '#f2f2f2'];
+  const fmtDate = v => new Date(v).toISOString().slice(0, 10);
+  function draw(id, series) {
+    const el = document.getElementById(id);
+    if (!el || !window.Chart) return;
+    const muted = css('--muted'), line = css('--line');
+    new Chart(el, {
+      type: 'line',
+      data: { datasets: series.map((s, i) => ({
+        label: s.name, data: s.t.map((t, k) => ({ x: t, y: s.pct[k] })), borderColor: PALETTE[i % PALETTE.length],
+        borderWidth: 2, pointRadius: 0, tension: 0, stepped: id === 'live-chart' ? 'after' : false })) },
+      options: { parsing: false, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { labels: { color: muted, boxWidth: 14 } } },
+        scales: { x: { type: 'linear', ticks: { color: muted, maxTicksLimit: 7, callback: fmtDate }, grid: { display: false } },
+                  y: { ticks: { color: muted, callback: v => v + '%' }, grid: { color: line } } } }
+    });
+  }
+  draw('bt-chart', {{ bt_chart | tojson }});
+  draw('live-chart', {{ live_chart | tojson }});
+</script>
+{% endblock %}

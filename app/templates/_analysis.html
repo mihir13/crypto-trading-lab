@@ -1,0 +1,4 @@
+{# Small display helpers shared by the dashboard and analysis pages. #}
+{% macro pips(n) -%}<span class="pips s{{ n }}" title="Stage {{ n }} of 4">{% for i in range(1, 5) %}<i class="{{ 'on' if n >= i }}"></i>{% endfor %}</span>{%- endmacro %}
+{% macro vpill(level) -%}{% if level %}<span class="pill v-{{ level }}">{{ {'none': 'no edge', 'weak': 'weak evidence', 'moderate': 'some evidence'}[level] or level }}</span>{% endif %}{%- endmacro %}
+{% macro ret(v) -%}{% if v is none %}–{% else %}<span class="{{ 'good' if v > 0 else 'bad' if v < 0 else '' }}">{{ v | pct }}</span>{% endif %}{%- endmacro %}

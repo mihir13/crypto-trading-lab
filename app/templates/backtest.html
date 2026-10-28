@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% import "_runs.html" as R %}
+{% block title %}Backtest Lab · Crypto Trading Lab{% endblock %}
+{% block content %}
+<h1>Backtest Lab</h1>
+<p class="sub">Replays a strategy over years of real Bitget candles with fees, slippage and funding, then asks the questions that matter: does it beat simply holding, does it beat random entries, and does it still work on a period it was never tuned on. Assume any result here is flattering until it survives all of that.</p>
+
+{% if active_job %}
+<div class="note">A {{ active_job.kind }} job is running: <a href="/backtest/run/{{ active_job.id }}">open run #{{ active_job.id }}</a>. Only one job runs at a time.</div>
+{% endif %}
+
+<h2>1 · Data</h2>
+{% if cov %}
+<div class="tbl-wrap"><table>
+  <tr><th>Pair</th><th>Timeframe</th><th>From</th><th>To</th><th class="num">Candles</th><th class="num">Missing</th><th class="num">Funding rows</th><th>Funding source</th></tr>
+  {% for c in cov %}
+  <tr>
+    <td>{{ c.symbol | pair(short=False) }}</td><td>{{ c.tf }}</td><td>{{ c.first }}</td><td>{{ c.last }}</td>
+    <td class="num">{{ '{:,}'.format(c.candles) }}</td>
+    <td class="num {{ 'bad' if c.missing }}">{{ c.missing }}</td>
+    <td class="num">{{ '{:,}'.format(c.funding_rows) }}</td>
+    <td class="muted">{{ c.funding_real }} Bitget + Binance proxy</td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% else %}
+<div class="tbl-wrap"><div class="empty">No historical data yet. Download it below.</div></div>
+{% endif %}
+<form class="row" method="post" action="/backtest/data" style="margin-top:12px">
+  <select name="tf" style="width:auto">
+    {% for t in ['4h', '1h', '1d'] %}<option {{ 'selected' if t == cfg.timeframe }}>{{ t }}</option>{% endfor %}
+  </select>
+  <button {{ 'disabled' if active_job }}>Download or update data</button>
+  <span class="hint" style="margin:0">Public Bitget candles for {{ all_pairs | join(', ') }}, plus funding history. Re-running only fetches what's new.
+    {% if last_data %}Last download: <a href="/backtest/run/{{ last_data.id }}">#{{ last_data.id }} ({{ last_data.status }})</a>.{% endif %}</span>
+</form>
+
+<h2>2 · Run a test</h2>
+{% if saved %}
+<form class="row" method="get" action="/backtest" style="margin-bottom:12px">
+  <label style="margin:0">Prefill from strategy</label>
+  <select name="strategy_id" style="width:auto" onchange="this.form.submit()">
+    {% for sv in saved %}<option value="{{ sv.id }}" {{ 'selected' if sv.id == chosen_id }}>{{ sv.name }}</option>{% endfor %}
+  </select>
+  <noscript><button class="ghost">Load</button></noscript>
+</form>
+{% endif %}
+{% if not cov %}
+<div class="note">Download data first.</div>
+{% else %}
+<form class="panel" method="post" action="/backtest/run">
+  <input type="hidden" name="strategy_id" value="{{ link_id }}">
+  <div class="fields" style="grid-template-columns: repeat(auto-fill, minmax(280px, 1fr))">
+    <label class="opt"><input type="radio" name="kind" value="audit" checked>
+      <span><b>Audit</b> <span class="muted">Run the strategy exactly as configured over the chosen period. No tuning. Answers: does it work as it stands?</span></span></label>
+    <label class="opt"><input type="radio" name="kind" value="oos">
+      <span><b>Out-of-sample test</b> <span class="muted">Tune {{ grid_size }} parameter sets on the early part of history only, then measure the winner once on the later, unseen part. Answers: is any "edge" real or just fitted to the past?</span></span></label>
+  </div>
+
+  <div class="fields" style="margin-top:18px">
+    <div><label>Strategy</label>
+      <select name="strategy">{% for k, s in strategies.items() %}<option value="{{ k }}" {{ 'selected' if k == cfg.strategy }}>{{ s.label }}</option>{% endfor %}</select></div>
+    <div><label>Pairs</label><input type="text" name="symbols" data-pairs value="{{ cfg.pairs | join(', ') }}"></div>
+    <div><label>Timeframe</label>
+      <select name="tf">{% for t in tfs %}<option {{ 'selected' if t == cfg.timeframe }}>{{ t }}</option>{% endfor %}</select></div>
+    <div><label>From (blank = earliest)</label><input type="text" name="start" placeholder="YYYY-MM-DD"></div>
+    <div><label>To (blank = latest)</label><input type="text" name="end" placeholder="YYYY-MM-DD"></div>
+    <div><label>Random-entry runs (0 skips)</label><input type="number" name="n_random" value="200" min="0" max="500"></div>
+    <div><label>Out-of-sample: training share (%)</label><input type="number" name="split_pct" value="60" min="30" max="80">
+      <div class="hint">The rest is the unseen test period.</div></div>
+    <div><label>Out-of-sample: min trades to qualify</label><input type="number" name="min_trades" value="20" min="5" max="500">
+      <div class="hint">Parameter sets with fewer training trades can't be picked.</div></div>
+  </div>
+
+  <details style="margin-top:16px">
+    <summary>Costs and account (prefilled from the chosen strategy)</summary>
+    <div class="fields" style="margin-top:12px">
+      <div><label>Taker fee per side (%)</label><input type="number" step="any" name="taker_fee_pct" value="{{ '%.4f' % taker_fee_pct }}"></div>
+      <div><label>Slippage per market fill (%)</label><input type="number" step="any" name="slippage_pct" value="{{ cfg.slippage_pct }}"></div>
+      <div><label>Starting capital ($)</label><input type="number" step="any" name="capital" value="{{ cfg.starting_capital }}"></div>
+      <div><label>Risk per trade (%)</label><input type="number" step="any" name="risk_pct" value="{{ cfg.risk_pct }}"></div>
+      <div><label>Leverage (x)</label><input type="number" name="leverage" value="{{ cfg.leverage }}"></div>
+      <div><label>Max margin per trade (%)</label><input type="number" step="any" name="max_margin_pct" value="{{ cfg.max_margin_pct }}"></div>
+      <div><label>Max open trades</label><input type="number" name="max_simultaneous" value="{{ cfg.max_simultaneous }}"></div>
+      <div><label>Max hold (hours)</label><input type="number" name="max_hold_hours" value="{{ cfg.max_hold_hours }}"></div>
+    </div>
+  </details>
+
+  <details style="margin-top:12px">
+    <summary>Strategy parameters (prefilled from the chosen strategy; an Audit uses these as-is)</summary>
+    <div class="fields" style="margin-top:12px">
+      {% for key, default in strat.default_params.items() %}
+      <div><label>{{ key }}</label><input type="number" step="any" name="p_{{ key }}" value="{{ params.get(key, default) }}"></div>
+      {% endfor %}
+    </div>
+    {% if grid %}
+    <div class="hint" style="margin-top:10px">An out-of-sample test tunes over: {% for k, v in grid.items() %}<code>{{ k }}</code> {{ v }}{{ '; ' if not loop.last }}{% endfor %} ({{ grid_size }} valid combinations). More combinations means more chances to fit noise, so the grid is kept modest.</div>
+    {% endif %}
+  </details>
+
+  <div style="margin-top:18px"><button {{ 'disabled' if active_job }}>Run test</button>
+    <span class="hint" style="margin-left:10px">An audit takes ~20 seconds, an out-of-sample test ~1 minute. It runs in the background.</span></div>
+</form>
+{% endif %}
+
+<h2>What to keep in mind</h2>
+<div class="cols">
+  <div class="card" style="border-top-color: var(--good)">
+    <h3>Built in to keep results honest</h3>
+    <ul class="plain">
+      <li>A signal on a candle's close is acted on at the <b>next</b> candle's open, never the same one (tests prove no lookahead).</li>
+      <li>Every fill pays your slippage setting against you, plus the taker fee.</li>
+      <li>If one candle touches both stop and target, the <b>stop</b> is assumed to hit first. A stop that gaps fills at the worse price.</li>
+      <li>Real funding rates while a trade is open (Bitget's own for the last ~90 days, Binance's as a proxy before that).</li>
+      <li>Isolated-margin liquidation is modelled.</li>
+      <li>Live bot and backtest run the same strategy code and the same cost model.</li>
+    </ul>
+  </div>
+  <div class="card" style="border-top-color: var(--bad)">
+    <h3>Not modelled: real results can be worse</h3>
+    <ul class="plain">
+      <li>Order-book depth and market impact (fine for small size, wrong for large).</li>
+      <li>Partial fills, exchange downtime, API latency, stops skipped in fast markets.</li>
+      <li>The order of highs and lows inside a candle (candles only give open/high/low/close).</li>
+      <li><b>Survivorship:</b> SOL, AVAX and LINK are coins that still exist today. Ones that collapsed aren't in the sample.</li>
+      <li><b>One market regime:</b> 2021 to 2026 was mostly falling for these coins. A different regime can behave differently.</li>
+      <li>One out-of-sample split is one roll of the dice; treat it as evidence, not proof.</li>
+    </ul>
+  </div>
+</div>
+
+<h2>Past runs</h2>
+{% if runs %}
+{{ R.table(runs) }}
+<div class="hint">For out-of-sample runs the numbers shown are for the unseen test period, not the flattering training period.</div>
+{% else %}
+<div class="tbl-wrap"><div class="empty">No runs yet.</div></div>
+{% endif %}
+{% endblock %}

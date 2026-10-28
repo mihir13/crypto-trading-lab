@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Glossary · Crypto Trading Lab{% endblock %}
+{% block content %}
+<h1>Glossary</h1>
+<p class="sub">Plain-English meanings for the trading terms used on this site.</p>
+<div class="card"><dl class="glossary" style="margin:0">
+  {% for term, text in terms %}<dt>{{ term }}</dt><dd>{{ text }}</dd>{% endfor %}
+</dl></div>
+{% endblock %}

@@ -1,0 +1,16 @@
+{# Pager control for any paginated list. Usage: {% import "_pagination.html" as P %} then
+   {{ P.pager(pager) }} where `pager` is the dict app/pagination.py's page_meta()/paginate()
+   returns, with a `links` key attached (pager_links()). #}
+{% macro pager(p) -%}
+{% if p.total > 0 -%}
+<div class="pager">
+  <span class="muted">{{ p.start }}–{{ p.end }} of {{ p.total }}</span>
+  <span class="pager-sizes">{% for s in p.links.sizes %}<a class="{{ 'on' if s.on }}" href="{{ s.href }}">{{ s.n }}</a>{% endfor %}</span>
+  <span class="pager-nav">
+    {% if p.links.prev %}<a class="btn ghost" href="{{ p.links.prev }}">‹ Prev</a>{% else %}<span class="btn ghost" aria-disabled="true">‹ Prev</span>{% endif %}
+    <span class="muted">Page {{ p.page }} / {{ p.pages }}</span>
+    {% if p.links.next %}<a class="btn ghost" href="{{ p.links.next }}">Next ›</a>{% else %}<span class="btn ghost" aria-disabled="true">Next ›</span>{% endif %}
+  </span>
+</div>
+{%- endif %}
+{%- endmacro %}

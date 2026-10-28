@@ -1,0 +1,11 @@
+{# Simple stroke icons. Usage: {{ icon('futures') }} #}
+{% macro icon(name) -%}
+{%- if name == 'overview' -%}<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+{%- elif name == 'futures' -%}<svg viewBox="0 0 24 24"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/></svg>
+{%- elif name == 'strategies' -%}<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="5" rx="1.2"/><rect x="4" y="11" width="16" height="5" rx="1.2"/><line x1="4" y1="20" x2="14" y2="20"/></svg>
+{%- elif name == 'bots' -%}<svg viewBox="0 0 24 24"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/></svg>
+{%- elif name == 'analysis' -%}<svg viewBox="0 0 24 24"><line x1="5" y1="20" x2="5" y2="11"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="19" y1="20" x2="19" y2="14"/></svg>
+{%- elif name == 'backtest' -%}<svg viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><polyline points="3 4 3.5 9 8.5 8.5"/><polyline points="12 7.5 12 12 15.5 14"/></svg>
+{%- elif name == 'admin' -%}<svg viewBox="0 0 24 24"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="17" x2="20" y2="17"/><circle cx="9" cy="7" r="2.3"/><circle cx="15" cy="17" r="2.3"/></svg>
+{%- endif -%}
+{%- endmacro %}

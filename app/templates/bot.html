@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% import "_pagination.html" as P %}
+{% block title %}{{ bot.name }} · Crypto Trading Lab{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="sub" style="margin:0"><a href="/bots">← Live Bots</a></p>
+    <h1>{{ bot.name }}
+      {% if halted %}<span class="pill halt">halted</span>
+      {% elif bot.status == 'running' %}<span class="pill on">running</span>
+      {% else %}<span class="pill off">paused</span>{% endif %}
+    </h1>
+    <p class="sub">
+      {{ strat_label }} · {{ cfg.pairs | pair_list(short=False) }} · {{ cfg.timeframe }} · {{ cfg.leverage }}x isolated · paper only.
+      Started {{ bot.started_at | iso_local }} · last scan {{ last_scan }}{% if next_scan and bot.status == 'running' %} · next ≈ {{ next_scan }}{% endif %} (UK time)
+    </p>
+  </div>
+  <div class="actions">
+    <form method="post" action="/bots/{{ bot.id }}/scan"><button class="ghost">Scan now</button></form>
+    <form method="post" action="/bots/{{ bot.id }}/status">
+      {% if bot.status == 'running' %}<input type="hidden" name="status" value="paused"><button class="ghost">Pause</button>
+      {% else %}<input type="hidden" name="status" value="running"><button>Start</button>{% endif %}
+    </form>
+    <a class="btn ghost" href="/analysis/replay/{{ bot.id }}">Compare with backtest</a>
+    <a class="btn ghost" href="/strategies/{{ bot.strategy_id }}">Strategy</a>
+  </div>
+</div>
+
+{% if describe %}<p class="sub" style="margin-top:-6px">{{ describe }}</p>{% endif %}
+{% if halted %}
+<div class="note"><b>Kill switch:</b> {{ halted }}.
+  <form method="post" action="/bots/{{ bot.id }}/resume" style="display:inline"><button class="ghost" style="margin-left:10px">Clear and resume</button></form>
+</div>
+{% endif %}
+{% if last_error %}<div class="note"><b>Last scan error:</b> {{ last_error }}</div>{% endif %}
+
+<div class="grid">
+  <div class="tile"><div class="k">Balance</div><div class="v">{{ summ.balance | money }}</div></div>
+  <div class="tile"><div class="k">Return</div>
+    <div class="v {{ 'good' if summ.return_pct >= 0 else 'bad' }}">{{ summ.return_pct | signed }}%</div></div>
+  <div class="tile"><div class="k">Closed trades</div><div class="v">{{ summ.trades }}</div></div>
+  <div class="tile"><div class="k">Win rate</div><div class="v">{{ '%.0f' % summ.win_rate }}%</div></div>
+  <div class="tile"><div class="k">Profit factor</div>
+    <div class="v">{{ '%.2f' % summ.profit_factor if summ.profit_factor is not none else '–' }}</div></div>
+  <div class="tile"><div class="k">Max drawdown</div><div class="v">{{ '%.1f' % summ.max_drawdown }}%</div></div>
+  <div class="tile"><div class="k">Fees paid</div><div class="v">{{ summ.fees | money }}</div></div>
+  <div class="tile"><div class="k">Funding paid</div><div class="v">{{ summ.funding | money }}</div></div>
+</div>
+
+{% if evidence %}
+<div class="note" style="border-left-color: {{ 'var(--warn)' if evidence.startswith('EXPERIMENT') else 'var(--bad)' }}"><b>Evidence:</b> {{ evidence }}</div>
+{% endif %}
+
+{% if sig_hist %}
+  {% if sig_hist.signals == 0 %}
+  <div class="note" style="border-left-color: var(--bad)"><b>This bot can't trade with its current settings.</b> Replaying the strategy over {{ '%.1f' % sig_hist.years }} years of stored history for {{ sig_hist.pairs }} pairs produced <b>0</b> entry signals, so paper trading would never open a position. The Backtest Lab's signal funnel shows which condition blocks entries. <a href="/backtest?strategy_id={{ bot.strategy_id }}">Open the Backtest Lab</a></div>
+  {% else %}
+  <div class="note" style="border-left-color: var(--accent)">Replayed over {{ '%.1f' % sig_hist.years }} years of history, these settings would have produced {{ sig_hist.signals }} entry signals across {{ sig_hist.pairs }} pairs (about {{ '%.1f' % sig_hist.per_pair_year }} per pair per year). <a href="/backtest?strategy_id={{ bot.strategy_id }}">Backtest Lab</a></div>
+  {% endif %}
+{% endif %}
+
+{% if summ.trades < 30 %}
+<div class="note">Only {{ summ.trades }} closed trade{{ '' if summ.trades == 1 else 's' }}. This is far too few to judge the strategy: results this small are mostly luck. Use the Backtest Lab for a real sample.</div>
+{% endif %}
+
+<h2>Equity</h2>
+<div class="chart-box"><canvas id="eq"></canvas></div>
+
+<h2>Open positions</h2>
+{% if positions %}
+<div class="tbl-wrap"><table>
+  <tr><th>Pair</th><th>Opened (UK time)</th><th class="num">Entry</th><th class="num">Stop</th><th class="num">Target</th>
+      <th class="num">Mark</th><th class="num">Unrealized</th><th class="num">Notional</th></tr>
+  {% for p in positions %}
+  <tr>
+    <td>{{ p.symbol | pair(short=False) }}</td><td>{{ p.entry_time | iso_local }}</td>
+    <td class="num">{{ '%.4f' % p.entry_price }}</td><td class="num">{{ '%.4f' % p.stop }}</td>
+    <td class="num">{{ '%.4f' % p.target }}</td>
+    <td class="num">{{ '%.4f' % p.mark if p.mark else '–' }}</td>
+    <td class="num {{ 'good' if p.unrealized and p.unrealized > 0 else 'bad' if p.unrealized else '' }}">{{ p.unrealized | signed(3) }}</td>
+    <td class="num">{{ p.notional | money }}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% else %}
+<div class="tbl-wrap"><div class="empty">No open positions.</div></div>
+{% endif %}
+
+<h2>Closed trades</h2>
+{% if closed %}
+<div class="tbl-wrap"><table>
+  <tr><th>Pair</th><th>Closed (UK time)</th><th>Outcome</th><th class="num">Entry</th><th class="num">Exit</th>
+      <th class="num">Gross</th><th class="num">Fees</th><th class="num">Funding</th><th class="num">Net</th><th class="num">Balance</th></tr>
+  {% for t in closed %}
+  <tr>
+    <td>{{ t.symbol | pair(short=False) }}</td><td>{{ t.exit_time | iso_local }}</td><td>{{ t.outcome }}</td>
+    <td class="num">{{ '%.4f' % t.entry_price }}</td><td class="num">{{ '%.4f' % t.exit_price }}</td>
+    <td class="num">{{ t.gross_pnl | signed(3) }}</td>
+    <td class="num">{{ ((t.fee_open or 0) + (t.fee_close or 0)) | money(3) }}</td>
+    <td class="num">{{ (t.funding or 0) | money(3) }}</td>
+    <td class="num {{ 'good' if t.net_pnl > 0 else 'bad' }}">{{ t.net_pnl | signed(3) }}</td>
+    <td class="num">{{ t.balance_after | money }}</td>
+  </tr>
+  {% endfor %}
+</table>{{ P.pager(pager) }}</div>
+{% else %}
+<div class="tbl-wrap"><div class="empty">No closed trades yet.</div></div>
+{% endif %}
+
+<h2>Run configuration</h2>
+<div class="tbl-wrap"><table>
+  <tr><th>Parameter</th><th>Value</th><th>Setting</th><th>Value</th></tr>
+  {% set p = cfg.params.items() | list %}
+  {% set rows = [('Starting capital', cfg.starting_capital | money), ('Risk per trade', cfg.risk_pct ~ '%'), ('Max open trades', cfg.max_simultaneous),
+                 ('Leverage', cfg.leverage ~ 'x'), ('Max margin/trade', cfg.max_margin_pct ~ '%'), ('Taker fee/side', '%.3f%%' % (cfg.taker_fee * 100)),
+                 ('Slippage/fill', cfg.slippage_pct ~ '%'), ('Max hold', cfg.max_hold_hours ~ 'h'), ('Skip if |funding| above', '%.3f%%' % (cfg.max_funding_abs * 100)),
+                 ('Daily loss limit', cfg.daily_loss_limit_pct ~ '%'), ('Scan every', cfg.scan_minutes ~ ' min')] %}
+  {% for i in range([p | length, rows | length] | max) %}
+  <tr>
+    <td class="muted">{{ p[i][0] if i < p | length else '' }}</td><td class="mono">{{ p[i][1] if i < p | length else '' }}</td>
+    <td class="muted">{{ rows[i][0] if i < rows | length else '' }}</td><td class="mono">{{ rows[i][1] if i < rows | length else '' }}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+<div class="hint">Snapshot taken when this bot started; editing the strategy afterwards does not change it.</div>
+
+<h2>Event log</h2>
+{% if events %}
+<div class="tbl-wrap"><table>
+  {% for e in events %}
+  <tr><td class="muted mono">{{ e.ts | iso_local }}</td>
+      <td class="{{ 'bad' if e.level == 'error' else 'warn' if e.level == 'warn' else '' }}">{{ e.message }}</td></tr>
+  {% endfor %}
+</table></div>
+{% else %}
+<div class="tbl-wrap"><div class="empty">Nothing logged yet.</div></div>
+{% endif %}
+
+<h2>Danger zone</h2>
+<form class="panel" method="post" action="/bots/{{ bot.id }}/reset">
+  <div class="row">
+    <div style="flex:1;min-width:220px"><label>Type RESET to wipe this bot's paper trades and restart from its starting capital</label>
+      <input type="text" name="confirm" autocomplete="off"></div>
+    <button class="danger">Reset paper account</button>
+  </div>
+</form>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+  const labels = {{ summ.equity_labels | tojson }};
+  const data = {{ summ.equity | tojson }};
+  const box = document.querySelector('.chart-box');
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  let chart;
+
+  function draw() {
+    if (data.length < 2) {
+      box.innerHTML = '<div class="empty">The equity curve appears after the first closed trade.</div>';
+      return;
+    }
+    if (!window.Chart) {
+      box.innerHTML = '<div class="empty">Chart library could not load (this browser needs internet).</div>';
+      return;
+    }
+    if (chart) chart.destroy();
+    const rgb = css('--accent-rgb'), muted = css('--muted');
+    const ctx = document.getElementById('eq').getContext('2d');
+    const fill = ctx.createLinearGradient(0, 0, 0, 260);
+    fill.addColorStop(0, 'rgba(' + rgb + ',.35)');
+    fill.addColorStop(1, 'rgba(' + rgb + ',0)');
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: { labels, datasets: [{ data, borderColor: css('--accent'), backgroundColor: fill, borderWidth: 2,
+                                   fill: true, tension: .2, pointRadius: data.length > 40 ? 0 : 3,
+                                   pointBackgroundColor: css('--accent') }] },
+      options: { maintainAspectRatio: false, plugins: { legend: { display: false } },
+                 scales: { x: { ticks: { color: muted, maxTicksLimit: 6 }, grid: { display: false } },
+                           y: { ticks: { color: muted, callback: v => '$' + v }, grid: { color: css('--line') } } } }
+    });
+  }
+  draw();
+</script>
+{% endblock %}

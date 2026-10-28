@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% import "_analysis.html" as A %}
+{% block title %}Replay · {{ bot.name }} · Crypto Trading Lab{% endblock %}
+{% block content %}
+<p class="sub" style="margin:0"><a href="/analysis">← Analysis</a></p>
+<h1>Backtest vs live: {{ bot.name }} <span class="muted" style="font-size:16px">bot #{{ bot.id }}</span></h1>
+<p class="sub">The backtest simulator, run over exactly the period this bot has been live and with this bot's own settings and costs,
+  compared trade by trade with what the bot actually did. Where they differ is real-world friction the backtest doesn't capture.
+  <a href="/bots/{{ bot.id }}">Bot page</a>{% if strategy %} · <a href="/strategies/{{ strategy.id }}">Strategy</a>{% endif %}</p>
+
+{% if err %}
+<div class="note">{{ err }}</div>
+{% else %}
+{% set r = rep %}
+<div class="grid">
+  <div class="tile"><div class="k">Live return</div><div class="v">{{ A.ret(r.live_return_pct) }}</div></div>
+  <div class="tile"><div class="k">Backtest, same window</div><div class="v">{{ A.ret(r.bt_return_pct) }}</div></div>
+  <div class="tile"><div class="k">Trades: live / backtest</div><div class="v">{{ r.n_live }} / {{ r.n_bt }}</div></div>
+  <div class="tile"><div class="k">Same trade in both</div><div class="v">{{ r.n_matched }}{% if r.match_share is not none %} <span class="muted" style="font-size:14px">({{ '%.0f' % (r.match_share * 100) }}%)</span>{% endif %}</div></div>
+  <div class="tile"><div class="k">Avg entry vs backtest</div><div class="v">{{ ('%+.2f%%' % r.avg_entry_slip_pct) if r.avg_entry_slip_pct is not none else '–' }}</div></div>
+  <div class="tile"><div class="k">Avg R gap (live − backtest)</div><div class="v">{{ ('%+.2f' % r.avg_r_gap) if r.avg_r_gap is not none else '–' }}</div></div>
+</div>
+<div class="hint">Window: {{ r.window.start | datetime_ms }} to {{ r.window.end | datetime_ms }} ({{ '%.1f' % r.window.days }} days, UK time), using stored candles up to {{ r.data_last_ms | datetime_ms }}.
+  Live return includes open positions at their last mark; the backtest closes open positions at the end of the window with costs.
+  {% if r.n_live < 10 and r.n_bt < 10 %}<b>With fewer than 10 trades this comparison is anecdotal.</b>{% endif %}</div>
+
+<h2>Read this as</h2>
+<ul class="plain">
+  <li><b>Same trade in both:</b> the live bot and the backtest both took the trade from the same signal. Live and backtest agreeing on most trades means the backtest is a fair picture of what the bot does.</li>
+  <li><b>Live only:</b> the bot traded but the backtest didn't (for instance a slot or margin limit hit differently, or the settings changed). A trade opened after the newest stored candle can't have a backtest twin yet, so a recent one here is normal.</li>
+  <li><b>Backtest only:</b> the backtest traded but the bot missed it (bot was paused or scanning late, funding was too high at that moment, price had moved outside the stop/target range).</li>
+  <li><b>Entry vs backtest</b> positive means live paid more than the backtest assumed (the backtest fills at the next candle's open, live fills when it notices).</li>
+</ul>
+
+<h2>Same trade in both ({{ r.matched | length }})</h2>
+{% if r.matched %}
+<div class="tbl-wrap"><table>
+  <tr><th>Pair</th><th>Backtest entry (UK)</th><th class="num">Live entry</th><th class="num">Backtest entry</th><th class="num">Diff</th>
+      <th>Live exit</th><th>Backtest exit</th><th class="num">Live R</th><th class="num">Backtest R</th></tr>
+  {% for lt, bt in r.matched %}
+  <tr><td>{{ lt.symbol | pair(short=False) }}</td><td>{{ bt.entry_ts | datetime_ms }}</td>
+    <td class="num">{{ '%.4f' % lt.entry_price }}</td><td class="num">{{ '%.4f' % bt.entry }}</td>
+    <td class="num">{{ '%+.2f%%' % ((lt.entry_price / bt.entry - 1) * 100) }}</td>
+    <td>{{ lt.outcome or 'open' }}</td><td>{{ bt.outcome }}</td>
+    <td class="num">{{ '%+.2f' % lt.r if lt.r is not none else '–' }}</td><td class="num">{{ '%+.2f' % bt.r }}</td></tr>
+  {% endfor %}
+</table></div>
+{% else %}<div class="tbl-wrap"><div class="empty">No trades in common yet.</div></div>{% endif %}
+
+<h2>Live only ({{ r.live_only | length }})</h2>
+{% if r.live_only %}
+<div class="tbl-wrap"><table>
+  <tr><th>Pair</th><th>Opened (UK)</th><th class="num">Entry</th><th>Status</th><th>Outcome</th><th class="num">R</th></tr>
+  {% for t in r.live_only %}
+  <tr><td>{{ t.symbol | pair(short=False) }}</td><td>{{ t.entry_time | iso_local }}</td><td class="num">{{ '%.4f' % t.entry_price }}</td>
+    <td>{{ t.status }}</td><td>{{ t.outcome or '–' }}</td><td class="num">{{ '%+.2f' % t.r if t.r is not none else '–' }}</td></tr>
+  {% endfor %}
+</table></div>
+{% else %}<div class="tbl-wrap"><div class="empty">None.</div></div>{% endif %}
+
+<h2>Backtest only ({{ r.bt_only | length }})</h2>
+{% if r.bt_only %}
+<div class="tbl-wrap"><table>
+  <tr><th>Pair</th><th>Entered (UK)</th><th class="num">Entry</th><th>Outcome</th><th class="num">R</th></tr>
+  {% for t in r.bt_only %}
+  <tr><td>{{ t.symbol | pair(short=False) }}</td><td>{{ t.entry_ts | datetime_ms }}</td><td class="num">{{ '%.4f' % t.entry }}</td>
+    <td>{{ t.outcome }}</td><td class="num">{{ '%+.2f' % t.r }}</td></tr>
+  {% endfor %}
+</table></div>
+{% else %}<div class="tbl-wrap"><div class="empty">None.</div></div>{% endif %}
+{% endif %}
+{% endblock %}

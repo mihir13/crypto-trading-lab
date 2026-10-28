@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Live Bots · Crypto Trading Lab{% endblock %}
+{% block content %}
+<h1>Live Bots</h1>
+<p class="sub">Paper bots running strategies in parallel, each with its own account. Start one from a <a href="/strategies">strategy</a>. Never a real order.</p>
+
+{% if bots %}
+<div class="tbl-wrap"><table>
+  <tr><th>Bot</th><th>Strategy</th><th>Status</th><th class="num">Balance</th><th class="num">Return</th>
+      <th class="num">Closed</th><th class="num">Open</th><th class="num">Win rate</th><th class="num">Max DD</th><th>Started (UK)</th></tr>
+  {% for b in bots %}
+  <tr>
+    <td><a href="/bots/{{ b.id }}">{{ b.name }}</a></td>
+    <td class="muted">{{ b.strat_label }} · {{ b.cfg.pairs | length }} pairs · {{ b.cfg.timeframe }}</td>
+    <td>{% if b.halted %}<span class="pill halt">halted</span>{% elif b.status == 'running' %}<span class="pill on">running</span>{% else %}<span class="pill off">paused</span>{% endif %}</td>
+    <td class="num">{{ b.summ.balance | money }}</td>
+    <td class="num {{ 'good' if b.summ.return_pct >= 0 else 'bad' }}">{{ b.summ.return_pct | signed }}%</td>
+    <td class="num">{{ b.summ.trades }}</td><td class="num">{{ b.n_open }}</td>
+    <td class="num">{{ '%.0f' % b.summ.win_rate }}%</td><td class="num">{{ '%.1f' % b.summ.max_drawdown }}%</td>
+    <td class="muted">{{ b.started_at | iso_local }}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+<div class="hint">Small samples mean little: treat anything under ~30 closed trades as noise, and compare bots in the Backtest Lab first.</div>
+{% else %}
+<div class="tbl-wrap"><div class="empty">No bots yet. Open a <a href="/strategies">strategy</a> and press "Start paper bot".</div></div>
+{% endif %}
+{% endblock %}

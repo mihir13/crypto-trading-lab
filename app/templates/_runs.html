@@ -1,0 +1,25 @@
+{# Table of backtest runs. Usage: {% import "_runs.html" as R %}{{ R.table(runs, show_strategy=True) }} #}
+{% macro table(runs, show_strategy=True) -%}
+<div class="tbl-wrap"><table>
+  <tr><th>#</th><th>When (UK time)</th>{% if show_strategy %}<th>Strategy</th>{% endif %}<th>Type</th><th>Pairs</th><th>Result</th><th class="num">Trades</th><th class="num">Return</th><th class="num">Buy &amp; hold</th><th></th></tr>
+  {% for r in runs %}
+  <tr>
+    <td><a href="/backtest/run/{{ r.id }}">#{{ r.id }}</a></td>
+    <td class="muted">{{ r.created }}</td>
+    {% if show_strategy %}<td>{% if r.strategy_id %}<a href="/strategies/{{ r.strategy_id }}">{{ r.strategy_name }}</a>{% else %}<span class="muted">ad hoc · {{ r.strategy }}</span>{% endif %}</td>{% endif %}
+    <td>{{ 'Out-of-sample' if r.kind == 'oos' else 'Audit' }}</td>
+    <td>{{ r.symbol_list | pair_list }}</td>
+    <td>
+      {% if r.status == 'done' %}
+        <span class="pill v-{{ r.brief.level }}">{{ {'none': 'no edge shown', 'weak': 'weak evidence', 'moderate': 'some evidence'}[r.brief.level] or r.brief.level }}</span>
+      {% elif r.status == 'error' %}<span class="pill halt">failed</span>
+      {% else %}<span class="pill on">{{ r.status }} {{ '%.0f' % (r.progress * 100) if r.progress is defined }}</span>{% endif %}
+    </td>
+    <td class="num">{{ r.brief.trades if r.brief.trades is defined else '–' }}</td>
+    <td class="num {{ 'good' if r.brief.return_pct and r.brief.return_pct > 0 else 'bad' if r.brief.return_pct else '' }}">{{ r.brief.return_pct | pct if r.brief.return_pct is defined else '–' }}</td>
+    <td class="num muted">{{ r.brief.bh_return_pct | pct if r.brief.bh_return_pct is defined else '–' }}</td>
+    <td class="num"><a href="/backtest/run/{{ r.id }}">open</a></td>
+  </tr>
+  {% endfor %}
+</table></div>
+{%- endmacro %}

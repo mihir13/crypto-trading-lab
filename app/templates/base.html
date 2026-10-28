@@ -1,0 +1,84 @@
+{% from "_icons.html" import icon %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Crypto Trading Lab{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_v }}">
+</head>
+<body>
+  <aside class="side">
+    <a class="brand" href="/" title="Home" aria-label="Crypto Trading Lab home">
+      <span class="logo"><svg viewBox="0 0 24 24"><path d="M3 15l4.5-5.5 4 3.5L16 6l5 5"/></svg></span>
+      <span>Crypto Trading Lab</span>
+    </a>
+    <nav>
+      {% for key, href, label in nav %}
+        <a href="{{ href }}" class="{{ 'on' if key == active else '' }}">{{ icon(key) }}<span>{{ label }}</span></a>
+      {% endfor %}
+    </nav>
+    <div class="side-foot">
+      <a class="mini" href="/glossary" style="color:var(--muted)">Glossary: what do these terms mean?</a>
+      <div class="status"><span class="dot {{ bot_status[0] }}"></span><span>{{ bot_status[1] }}</span></div>
+      <div class="mini">No real orders, ever · LAN only</div>
+    </div>
+  </aside>
+  <div class="content">
+    <div class="ticker" id="ticker" hidden></div>
+    <main>
+      {% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  <script src="/static/pairs.js?v={{ asset_v }}" defer></script>
+  <script>
+    // every mention of a pair (SOLUSDT, SOL/USDT) links to its TradingView chart: Bitget USDT perpetual
+    // TradingView charts open in dark mode to match this site
+    const tvUrl = sym => 'https://www.tradingview.com/chart/?symbol=' + encodeURIComponent('BITGET:' + sym + '.P') + '&theme=dark';
+    (function () {
+      const re = /\b([A-Z0-9]{1,12})\/?USDT\b/g, has = /\b[A-Z0-9]{1,12}\/?USDT\b/, skip = new Set(['A', 'SCRIPT', 'STYLE', 'TEXTAREA', 'INPUT', 'SELECT', 'OPTION', 'BUTTON', 'CANVAS', 'CODE']);
+      const walker = document.createTreeWalker(document.querySelector('main'), NodeFilter.SHOW_TEXT, {
+        acceptNode: n => (n.parentElement && !skip.has(n.parentElement.tagName) && !n.parentElement.closest('a, button, [data-no-pair]') && has.test(n.nodeValue))
+          ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT });
+      const nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      nodes.forEach(node => {
+        re.lastIndex = 0;
+        const text = node.nodeValue, frag = document.createDocumentFragment();
+        let last = 0, m;
+        while ((m = re.exec(text))) {
+          frag.append(text.slice(last, m.index));
+          const a = document.createElement('a');
+          a.className = 'pair'; a.textContent = m[0]; a.href = tvUrl(m[1] + 'USDT');
+          a.target = '_blank'; a.rel = 'noopener noreferrer'; a.title = 'Open ' + m[1] + 'USDT on TradingView';
+          frag.append(a);
+          last = m.index + m[0].length;
+        }
+        frag.append(text.slice(last));
+        node.replaceWith(frag);
+      });
+    })();
+    // price strip: last price and 24h change for the pairs the strategies trade
+    (function () {
+      const el = document.getElementById('ticker');
+      const fmt = p => p >= 100 ? p.toFixed(2) : p >= 1 ? p.toFixed(3) : p.toPrecision(4);
+      async function load() {
+        try {
+          const rows = await (await fetch('/api/ticker')).json();
+          if (!rows.length) return;
+          el.innerHTML = rows.map(r => {
+            const c = r.change_pct, cls = c == null ? '' : c >= 0 ? 'up' : 'down';
+            return '<a class="tk" href="' + tvUrl(r.symbol) + '" target="_blank" rel="noopener noreferrer" title="Open ' + r.symbol + ' on TradingView"><b>' + r.symbol.replace('USDT', '') + '<i>/USDT</i></b> ' + fmt(r.price)
+              + (c == null ? '' : ' <span class="' + cls + '">' + (c >= 0 ? '▲ +' : '▼ ') + c.toFixed(2) + '%</span>') + '</a>';
+          }).join('') + '<span class="tk tag">PERPS · 24h · paper only</span>';
+          el.hidden = false;
+        } catch (e) { /* offline: the strip just stays hidden */ }
+      }
+      load(); setInterval(load, 20000);
+    })();
+  </script>
+</body>
+</html>

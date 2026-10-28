@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Strategies · Crypto Trading Lab{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Strategies</h1>
+    <p class="sub">A saved strategy is a type plus its parameters, pairs, timeframe and risk settings. Backtest it, or start a paper bot from it; run several at once and compare.</p>
+  </div>
+  <div class="actions"><a class="btn" href="/strategies/new">New strategy</a></div>
+</div>
+
+{% if rows %}
+<div class="tbl-wrap"><table>
+  <tr><th>Name</th><th>Type</th><th>Pairs</th><th>TF</th><th class="num">Risk</th><th class="num">Lev</th><th>Last backtest</th><th>Bots</th><th></th></tr>
+  {% for s in rows %}
+  <tr>
+    <td class="wrap" style="min-width:220px"><a href="/strategies/{{ s.id }}">{{ s.name }}</a>{% if s.archived %} <span class="pill off">archived</span>{% endif %}<div class="tagline">{{ s.tagline }}</div></td>
+    <td class="muted" {% if s.summary %}title="{{ s.summary }}"{% endif %}>{{ s.label }}</td>
+    <td class="muted">{{ s.pairs | pair_list }}</td>
+    <td>{{ s.timeframe }}</td>
+    <td class="num">{{ s.risk.risk_pct }}%</td><td class="num">{{ s.risk.leverage }}x</td>
+    <td>{% if s.last_bt %}<a href="/backtest/run/{{ s.last_bt.id }}">{{ s.last_bt.return_pct | pct if s.last_bt.return_pct is defined else '–' }}
+        <span class="muted">{{ 'OOS' if s.last_bt.kind == 'oos' else 'audit' }}</span></a>
+      {% if s.last_bt.level %}<span class="pill v-{{ s.last_bt.level }}">{{ {'none': 'no edge', 'weak': 'weak', 'moderate': 'some evidence'}[s.last_bt.level] or s.last_bt.level }}</span>{% endif %}
+      {% else %}<span class="muted">none</span>{% endif %}</td>
+    <td>{{ s.n_running }} running / {{ s.n_bots }} total</td>
+    <td class="row" style="justify-content:flex-end">
+      <a class="btn ghost" href="/backtest?strategy_id={{ s.id }}">Backtest</a>
+      <form method="post" action="/strategies/{{ s.id }}/bots"><button>Start paper bot</button></form>
+    </td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% else %}
+<div class="tbl-wrap"><div class="empty">No strategies yet. <a href="/strategies/new">Create one</a>.</div></div>
+{% endif %}
+<div class="hint" style="margin-top:10px">
+  {% if show_archived %}<a href="/strategies">Hide archived</a>{% else %}<a href="/strategies?archived=1">Show archived</a>{% endif %}
+</div>
+{% endblock %}

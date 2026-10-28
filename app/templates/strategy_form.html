@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% import "_runs.html" as R %}
+{% block title %}{{ s.name or 'New strategy' }} · Crypto Trading Lab{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="sub" style="margin:0"><a href="/strategies">← Strategies</a></p>
+    <h1>{{ s.name or 'New strategy' }}</h1>
+  </div>
+  {% if s.id %}
+  <div class="actions">
+    <a class="btn ghost" href="/backtest?strategy_id={{ s.id }}">Backtest</a>
+    <form method="post" action="/strategies/{{ s.id }}/duplicate"><button class="ghost">Duplicate</button></form>
+    <form method="post" action="/strategies/{{ s.id }}/bots"><button>Start paper bot</button></form>
+  </div>
+  {% endif %}
+</div>
+
+{% if s.id %}
+<section class="card plain-card">
+  <div class="tag">{{ plain.tagline }}</div>
+  <p>{{ plain.idea }}</p>
+  <details class="more">
+    <summary><span class="more-open">Read more</span><span class="more-close">Show less</span></summary>
+    <div class="more-body">
+      <div class="cols">
+        <div><h3>It buys when</h3><ul>{% for x in plain.buy %}<li>{{ x }}</li>{% endfor %}</ul></div>
+        <div><h3>It sells when (whichever comes first)</h3><ul>{% for x in plain.sell %}<li>{{ x }}</li>{% endfor %}</ul></div>
+        <div><h3>How much it risks</h3><ul>{% for x in plain.risk %}<li>{{ x }}</li>{% endfor %}</ul></div>
+      </div>
+      <div class="sect"><h3>What the tests say</h3>
+        <ul>{% for x in plain.track %}<li>{{ x }}</li>{% endfor %}</ul>
+        {% if plain.next %}<div class="{{ plain.next[1] }}" style="margin-top:8px"><b>Next step:</b> {{ plain.next[0] }}.</div>{% endif %}</div>
+      <div class="sect"><h3>Watch out for</h3><ul>{% for x in plain.watch %}<li>{{ x }}</li>{% endfor %}
+        <li>This is paper trading: nothing here uses real money, and past results don't guarantee future ones.</li></ul></div>
+      <details class="sect terms"><summary>Terms used here</summary>
+        <dl class="glossary">{% for term, text in plain.glossary %}<dt>{{ term }}</dt><dd>{{ text }}</dd>{% endfor %}</dl>
+        <div class="hint"><a href="/glossary">All terms</a></div></details>
+    </div>
+  </details>
+</section>
+
+<h2>Backtests</h2>
+{% if missing_data %}
+<div class="note">No stored {{ s.timeframe }} candles for {{ missing_data | join(', ') }}, so this strategy can't be backtested yet.
+  <form method="post" action="/strategies/{{ s.id }}/data" style="display:inline"><button class="ghost" style="margin-left:10px" {{ 'disabled' if active_job }}>Download data for this strategy</button></form></div>
+{% else %}
+<div class="row" style="margin-bottom:12px">
+  <form method="post" action="/strategies/{{ s.id }}/backtest"><input type="hidden" name="kind" value="audit"><button {{ 'disabled' if active_job }}>Run audit</button></form>
+  <form method="post" action="/strategies/{{ s.id }}/backtest"><input type="hidden" name="kind" value="oos"><button class="ghost" {{ 'disabled' if active_job }}>Run out-of-sample test</button></form>
+  <a class="btn ghost" href="/backtest?strategy_id={{ s.id }}">Custom backtest…</a>
+  <span class="hint" style="margin:0">Uses exactly the saved settings and costs. {% if active_job %}Another job is running.{% else %}An audit takes ~20s, an out-of-sample test ~1 min.{% endif %}</span>
+</div>
+{% endif %}
+{% if runs %}{{ R.table(runs, show_strategy=False) }}
+{% else %}<div class="tbl-wrap"><div class="empty">No backtests of this strategy yet.</div></div>{% endif %}
+
+<h2>Paper bots from this strategy</h2>
+{% if bots %}
+<div class="tbl-wrap"><table>
+  <tr><th>Bot</th><th>Status</th><th class="num">Balance</th><th class="num">Return</th><th class="num">Closed</th><th>Started (UK)</th></tr>
+  {% for b in bots %}
+  <tr><td><a href="/bots/{{ b.id }}">{{ b.name }} #{{ b.id }}</a></td>
+    <td>{% if b.halted %}<span class="pill halt">halted</span>{% elif b.status == 'running' %}<span class="pill on">running</span>{% else %}<span class="pill off">paused</span>{% endif %}</td>
+    <td class="num">{{ b.summ.balance | money }}</td>
+    <td class="num {{ 'good' if b.summ.return_pct >= 0 else 'bad' }}">{{ b.summ.return_pct | signed }}%</td>
+    <td class="num">{{ b.summ.trades }}</td><td class="muted">{{ b.started_at | iso_local }}</td></tr>
+  {% endfor %}
+</table></div>
+{% else %}
+<div class="tbl-wrap"><div class="empty">No bot started from this strategy yet.</div></div>
+{% endif %}
+
+<h2>Configuration</h2>
+{% endif %}
+<form class="panel" method="post" action="{{ '/strategies/%d' % s.id if s.id else '/strategies/new' }}">
+  <div class="fields">
+    <div><label>Name</label><input type="text" name="name" value="{{ s.name }}" required maxlength="80" placeholder="e.g. Breakout, wide stop"></div>
+    <div><label>Type</label>
+      <select name="type" id="stype">{% for k, t in types.items() %}
+        <option value="{{ k }}" {{ 'selected' if k == s.type }}>{{ t.label }}</option>{% endfor %}</select></div>
+
+    <div><label>Timeframe</label>
+      <select name="timeframe">{% for tf in timeframes %}<option {{ 'selected' if tf == s.timeframe }}>{{ tf }}</option>{% endfor %}</select></div>
+    <div style="grid-column: 1 / -1"><label>Pairs</label>
+      <input type="text" name="pairs" data-pairs value="{{ s.pairs | join(', ') }}">
+      <div class="hint">Up to {{ max_pairs }} coins, any USDT perpetual on Bitget. A newly listed coin has little history, so backtests only cover the period when every pair has data.
+        After saving, download data for any new pair from this page.{% if s.id %} Charts: {{ s.pairs | pair_list(short=False) }}.{% endif %}</div></div>
+    <div style="grid-column: 1 / -1"><label>Notes</label><input type="text" name="notes" value="{{ s.notes }}" placeholder="What you're testing with this variant"></div>
+  </div>
+
+  {% for k, t in types.items() %}
+  {% set vals = s.params if k == s.type else t.default_params %}
+  <fieldset class="ptype" data-type="{{ k }}" style="border:0;padding:0;margin:18px 0 0">
+    <h2 style="margin-top:0">Parameters: {{ t.label }}</h2>
+    <details class="more inline"><summary><b>{{ plain_types[k].tagline }}</b> <span class="more-open">Read more</span><span class="more-close">Show less</span></summary>
+      <div class="more-body what">{{ plain_types[k].idea }}</div></details>
+    {% if t.evidence %}<div class="note">{{ t.evidence }}</div>{% endif %}
+    {% set groups = t.param_groups or [('', t.default_params.keys() | list)] %}
+    {% for heading, keys in groups %}
+    {% if heading %}<div class="k" style="margin:14px 0 6px;font-weight:600">{{ heading }}</div>{% endif %}
+    <div class="fields">
+      {% for key in keys %}
+      {% set label = t.param_labels.get(key, key) %}
+      {% if key in t.flag_params %}
+      <div><label class="check"><input type="checkbox" name="p_{{ key }}" {{ 'checked' if vals.get(key, t.default_params[key]) }}> {{ label }}</label></div>
+      {% else %}
+      <div><label>{{ label }}</label><input type="number" step="any" name="p_{{ key }}" value="{{ vals.get(key, t.default_params[key]) }}"></div>
+      {% endif %}
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </fieldset>
+  {% endfor %}
+  <div class="hint">Don't tune these against live results. Choose them on one period in the <a href="/backtest">Backtest Lab</a> and check them on a later one, otherwise you're fitting noise.</div>
+
+  <h2>Account, risk and costs</h2>
+  <div class="fields">
+    <div><label>Starting capital ($)</label><input type="number" step="any" name="starting_capital" value="{{ s.risk.starting_capital }}"></div>
+    <div><label>Risk per trade (% of balance)</label><input type="number" step="any" name="risk_pct" value="{{ s.risk.risk_pct }}"></div>
+    <div><label>Max open trades</label><input type="number" name="max_simultaneous" value="{{ s.risk.max_simultaneous }}"></div>
+    <div><label>Leverage (x)</label><input type="number" name="leverage" value="{{ s.risk.leverage }}"></div>
+    <div><label>Max margin per trade (% of balance)</label><input type="number" step="any" name="max_margin_pct" value="{{ s.risk.max_margin_pct }}"></div>
+    <div><label>Taker fee per side (%)</label><input type="number" step="any" name="taker_fee_pct" value="{{ '%.4f' % taker_fee_pct }}"></div>
+    <div><label>Slippage per market fill (%)</label><input type="number" step="any" name="slippage_pct" value="{{ s.risk.slippage_pct }}">
+      <div class="hint">Keep this pessimistic.</div></div>
+    <div><label>Max hold (hours)</label><input type="number" name="max_hold_hours" value="{{ s.risk.max_hold_hours }}"></div>
+    <div><label>Skip entry if |funding| above (%)</label><input type="number" step="any" name="max_funding_pct" value="{{ '%.3f' % max_funding_pct }}"></div>
+    <div><label>Daily loss limit (%)</label><input type="number" step="any" name="daily_loss_limit_pct" value="{{ s.risk.daily_loss_limit_pct }}"></div>
+    <div><label>Scan every (minutes)</label><input type="number" name="scan_minutes" value="{{ s.risk.scan_minutes }}"></div>
+  </div>
+  <div style="margin-top:14px"><button>{{ 'Save strategy' if s.id else 'Create strategy' }}</button></div>
+  {% if s.id %}<div class="hint">Saving does not change bots that are already running; they keep the settings they started with.</div>{% endif %}
+</form>
+
+{% if s.id %}
+<h2>Archive</h2>
+<form class="panel" method="post" action="/strategies/{{ s.id }}/archive">
+  <input type="hidden" name="archived" value="1"><button class="ghost">Archive this strategy</button>
+  <span class="hint" style="margin-left:10px">Hides it from lists; its bots and history are kept.</span>
+</form>
+{% endif %}
+
+<script>
+  const sel = document.getElementById('stype');
+  function showType() {
+    document.querySelectorAll('.ptype').forEach(f => {
+      const on = f.dataset.type === sel.value;
+      f.hidden = !on;
+      f.disabled = !on;            // disabled fieldsets are not submitted
+    });
+  }
+  sel.addEventListener('change', showType);
+  showType();
+</script>
+{% endblock %}
